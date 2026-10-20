@@ -19,6 +19,7 @@ import type { ConnectorAccountsTranslations, ConnectorCardTranslations } from '.
 import type { GatewayGroupOpenCopy, SkillDeepLinkCopy } from './types_deep_links'
 import type { ExternalOpenFailedCopy } from './types_external_open'
 import type { FirstRunCopy } from './types_first_run'
+import type { GatewayHostTranslations } from './types_gateway_host'
 import type { ModelMenuTranslations } from './types_model_menu'
 import type { ModelSettingsTranslations } from './types_model_settings'
 import type { NoticeTranslations } from './types_notices'
@@ -1128,10 +1129,8 @@ catalog: CatalogTranslations
       scopesRestored: (profiles: string) => string
       scopeNotRestored: (profile: string, error: string) => string
     }
-    gateway: {
+    gateway: GatewayHostTranslations & {
       loading: string
-      unavailableTitle: string
-      unavailableDesc: string
       title: string
       envOverride: string
       intro: string
@@ -3760,6 +3759,7 @@ catalog: CatalogTranslations
       sentMessage: (count: number) => string
     }
     web: {
+      embeddedPreviewHint: string
       appFailedToBoot: string
       serverNotFound: string
       remoteLoopback: string
