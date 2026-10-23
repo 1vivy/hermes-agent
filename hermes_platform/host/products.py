@@ -1,13 +1,14 @@
-"""NVIDIA platform recognition derived from host facts.
+"""Product recognition derived from host facts: NVIDIA platforms and known OEM machines.
 
-Recognition uses OS-reported CPU, GPU or PCI identity without environment-variable input.
+Recognition uses OS-reported CPU, GPU, PCI or SMBIOS identity without environment-variable input.
 """
 
 from __future__ import annotations
 
-from typing import Literal
+import re
+from typing import Literal, NamedTuple
 
-from hermes_platform.host import facts
+from hermes_platform.host import facts, smbios
 
 NvidiaPlatform = Literal["rtx_spark", "dgx_spark", "discrete"]
 
@@ -40,6 +41,36 @@ def classify_nvidia_platform(*, os_family: str, native_arch: str, cpu_model: str
         if any(marker in names or marker in cpu for marker in _DGX_SPARK_MARKERS):
             return "dgx_spark"
     return "discrete" if gpu_class == "nvidia" else None
+
+
+class KnownMachine(NamedTuple):
+    """A machine Hermes ships specific setup for, recognized from its SMBIOS identity."""
+
+    id: str  # stable key for machine-specific plugins, e.g. ``asus-proart-p14``
+    vendor: str  # ``smbios.vendor`` must equal this
+    model_code: str  # whole-word token in the SMBIOS product name or baseboard product
+    name: str
+
+
+# The OEM model code is the stable part of the SMBIOS product name; marketing text around it
+# varies by BIOS build ("ProArt P14 H7407BA_000293225", "ASUS ProArt P14 H7407BA").
+KNOWN_MACHINES = (
+    KnownMachine("asus-proart-p16", "ASUS", "H7607BA", "ASUS ProArt P16"),
+    KnownMachine("asus-proart-p14", "ASUS", "H7407BA", "ASUS ProArt P14"),
+    KnownMachine("asus-proart-gr1x", "ASUS", "GR1X", "ASUS ProArt GR1X"),
+)
+
+
+def recognize_machine(identity: smbios.SystemIdentity) -> KnownMachine | None:
+    """The ``KNOWN_MACHINES`` entry this identity names, or ``None``."""
+    brand = smbios.vendor(identity)
+    tokens = set(re.split(r"[\s_]+", f"{identity.product} {identity.board_product}".upper()))
+    return next((m for m in KNOWN_MACHINES if m.vendor == brand and m.model_code in tokens), None)
+
+
+def known_machine() -> KnownMachine | None:
+    """This host's ``KNOWN_MACHINES`` entry; SMBIOS is OEM-written, so a label, not attestation."""
+    return recognize_machine(smbios.system_identity())
 
 
 def nvidia_platform() -> NvidiaPlatform | None:
