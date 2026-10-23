@@ -144,3 +144,17 @@ def test_user_ripgrep_config_cannot_change_search_results(tree, ops_factory, mon
         str(tree / "a.py"), str(tree / "b.txt"), str(tree / "sub" / "c.py")}
     files = ops.search(pattern="*.py", path=str(tree), target="files").to_dict()
     assert sorted(files["files"]) == [str(tree / "a.py"), str(tree / "sub" / "c.py")], files
+
+
+def test_local_search_runs_the_pinned_ripgrep_not_the_first_on_path(_local_env, tmp_path, monkeypatch):
+    """The terminal PATH puts the user's tools first; Hermes's own search still runs PM's rg."""
+    import pm
+    from pm.install import InstalledPackage
+
+    pinned = tmp_path / "store" / "ripgrep" / "rg"
+    pinned.parent.mkdir(parents=True)
+    pinned.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(pm, "installed_package",
+                        lambda name: InstalledPackage(pinned.parent, "15", pinned) if name == "ripgrep" else None)
+    ops = ShellFileOperations(_local_env, cwd=str(tmp_path))
+    assert ops._resolve_command("rg") == str(pinned).replace("\\", "/")
