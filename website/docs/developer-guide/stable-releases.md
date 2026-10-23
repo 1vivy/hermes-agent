@@ -361,6 +361,13 @@ protected canary head receipts that tag.
 The protected publication controller verifies that exact annotated tag object
 before it flips the GitHub prerelease from draft to public, reads both states back,
 and only then advances the R2 head.
+Only Stable Release's `publish-canary` job publishes a canary. A direct dispatch of
+`desktop-bundled-release.yml` refuses a release tag, and the controller refuses
+any other workflow as a canary publisher. The canary Docker aliases (`:canary`,
+`:canary-desktop`) move only after `publish-canary` succeeds, so they follow the
+claim's green policy and lanes like every other canary channel. The canary's
+Termux packages go to `hermes-canary` under a pool prefix named by its tag, just
+as a stable attempt's go to `hermes-stable` under its attempt ref.
 
 ## Canary and one-off desktop identities
 
