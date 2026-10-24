@@ -45,13 +45,25 @@ def test_exit_keeps_tree_and_branch_when_head_moved_off_unpushed_branch(tmp_path
     assert _git(repo, "rev-parse", "refs/heads/hermes/hermes-moved") == work
 
 
-def test_orphan_pass_archives_unpushed_session_branch_before_deleting(tmp_path):
+def test_orphan_pass_archives_unpushed_session_branch_before_deleting(tmp_path, monkeypatch):
+    from hermes_cli import worktree_archive
+
     repo, wt, work = _repo_with_session(tmp_path, "hermes-orphan")
     _git(repo, "branch", "hermes/hermes-pushed", "origin/main")  # pushed orphan: no archive needed
+    _git(repo, "branch", "hermes/hermes-taken", work)  # unpushed too, checked out mid-pass below
     _git(repo, "worktree", "remove", "--force", str(wt))  # as the exit notice suggests
+    real_snapshot = worktree_archive.snapshot_branch
+
+    def snapshot_then_user_checks_out(root, branch, **kw):
+        arc = real_snapshot(root, branch, **kw)
+        if branch == "hermes/hermes-orphan":
+            _git(repo, "worktree", "add", "-q", str(tmp_path / "taken"), "hermes/hermes-taken")
+        return arc
+
+    monkeypatch.setattr(worktree_archive, "snapshot_branch", snapshot_then_user_checks_out)
 
     worktree_ops._prune_orphaned_branches(str(repo))
 
-    assert _git(repo, "branch", "--list", "hermes/*") == ""
-    archives = list_archives(str(repo))
-    assert [(a.meta.get("branch"), a.meta.get("head")) for a in archives] == [("hermes/hermes-orphan", work)]
+    assert _git(repo, "branch", "--list", "hermes/*", "--format=%(refname:short)") == "hermes/hermes-taken"
+    archived = sorted((a.meta.get("branch"), a.meta.get("head")) for a in list_archives(str(repo)))
+    assert archived == [("hermes/hermes-orphan", work), ("hermes/hermes-taken", work)]

@@ -1275,7 +1275,7 @@ def _reap_session_orphans(repo_root: str, sessions: list) -> None:
     if tips is None or unique is None:
         return  # unverifiable: keep every session branch
     unique_shas = set(unique.split())
-    env = noninteractive_git_env()
+    doomed = []
     for name, sha in zip(sessions, tips.split()):
         if sha in unique_shas:
             try:
@@ -1283,6 +1283,21 @@ def _reap_session_orphans(repo_root: str, sessions: list) -> None:
             except (ArchiveError, OSError, subprocess.SubprocessError) as exc:
                 logger.warning("Keeping branch %s: archive failed (%s)", name, exc)
                 continue
+        doomed.append((name, sha))
+    # Archiving takes a while and `update-ref -d` (unlike `branch -D`) deletes a checked-out
+    # branch, so re-read which branches a tree holds right before deleting.
+    try:
+        porcelain = _git_out(["worktree", "list", "--porcelain"], repo_root) if doomed else ""
+    except (OSError, subprocess.SubprocessError):
+        porcelain = None
+    if porcelain is None:
+        return
+    live = {line[len("branch refs/heads/"):] for line in porcelain.splitlines()
+            if line.startswith("branch refs/heads/")}
+    env = noninteractive_git_env()
+    for name, sha in doomed:
+        if name in live:
+            continue
         try:
             deleted = _git(["update-ref", "-d", f"refs/heads/{name}", sha], repo_root,
                            stdin=subprocess.DEVNULL, env=env).returncode == 0
