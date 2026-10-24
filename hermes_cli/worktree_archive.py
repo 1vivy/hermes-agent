@@ -308,6 +308,26 @@ def snapshot_worktree(repo_root: str, wt_path, *, reason: str, max_untracked_mb:
                    staged=staged)
 
 
+def snapshot_branch(repo_root: str, branch: str, *, reason: str) -> Archive:
+    """Archive a branch that has no worktree, in the same two-commit shape as a tree snapshot (its
+    tip's tree as both index and working state), so ``hermes worktree restore`` recreates the
+    branch in a fresh tree. Raises :class:`ArchiveError` on any failure."""
+    env = _env(repo_root)
+    head = _branch_tip(repo_root, branch, env)
+    if head is None:
+        raise ArchiveError(f"branch {branch} has no commit to archive")
+    tree = f"{head}^{{tree}}"
+    name = ref_safe(branch.rsplit("/", 1)[-1])
+    index_commit = _ok(["commit-tree", tree, "-p", head, "-m", f"index of {name}"], repo_root, env).strip()
+    meta = {"version": 1, "name": name, "repo_root": str(repo_root), "branch": branch, "head": head,
+            "index_commit": index_commit, "created": int(time.time()), "reason": reason, "skipped_untracked": []}
+    message = f"{_SUBJECT}{name}\n\n{json.dumps(meta, indent=1, ensure_ascii=False)}\n"
+    sha = _ok(["commit-tree", tree, "-p", head, "-p", index_commit], repo_root, env, stdin_text=message).strip()
+    ref = _create_ref(repo_root, name, sha, env)
+    logger.info("Archived branch %s -> %s (%s)", branch, ref, reason)
+    return Archive(ref=ref, name=ref[len(ARCHIVE_PREFIX):], sha=sha, created=meta["created"], meta=meta)
+
+
 def _parse_meta(body: str) -> dict:
     start = body.find("{")
     try:

@@ -513,26 +513,40 @@ def _worktree_merge_base_ref(path: str, timeout: float = 5) -> Optional[str]:
     return None
 
 
-def _worktree_has_unpushed_commits(worktree_path: str, timeout: int = 10) -> bool:
+def _unpushed_baseline(path: str, timeout: float = 10) -> Optional[list]:
+    """``git log`` args after ``--not`` naming what counts as pushed: every remote-tracking ref,
+    or the local trunk when the repo has none (nothing was ever pushed). None = no baseline;
+    every caller must then treat the work as unpushed. May raise like ``_git``."""
+    remote_refs = _git_out(["for-each-ref", "--format=%(refname)", "refs/remotes"], path, timeout=timeout)
+    if remote_refs is None:
+        return None
+    if remote_refs:
+        return ["--remotes"]
+    trunk = _worktree_local_trunk(path, timeout=timeout)
+    return [trunk] if trunk else None
+
+
+def _worktree_has_unpushed_commits(worktree_path: str, timeout: int = 10,
+                                   branch: Optional[str] = None) -> bool:
     """Whether a worktree has commits unreachable from any remote branch. Fails SAFE toward True.
 
+    *branch* (the tree's own branch, which the caller is about to delete with it) is judged
+    alongside ``HEAD``: after a ``git checkout`` / ``--detach`` elsewhere inside the tree, HEAD
+    can be pushed while the branch still holds the session's only copy of its commits.
     No remote-tracking refs = nothing was ever pushed, so the tree is compared against the local
     trunk instead (``_worktree_local_trunk``); no trunk either -> True. A shallow boundary can
     disconnect an older HEAD from origin/* so public commits look unpushed;
     ``_deepen_shallow_repo`` first if affordable.
     """
     try:
-        remote_refs = _git_out(["for-each-ref", "--format=%(refname)", "refs/remotes"], worktree_path,
-                               timeout=timeout)
-        if remote_refs is None:
+        baseline = _unpushed_baseline(worktree_path, timeout=timeout)
+        if baseline is None:
             return True
-        baseline = ["--remotes"]
-        if not remote_refs:
-            trunk = _worktree_local_trunk(worktree_path, timeout=timeout)
-            if trunk is None:
-                return True
-            baseline = [trunk]
-        unpushed = _git_out(["log", "--oneline", "HEAD", "--not", *baseline], worktree_path,
+        tips = ["HEAD"]
+        if branch and _git_out(["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+                               worktree_path, timeout=timeout):
+            tips.append(f"refs/heads/{branch}")
+        unpushed = _git_out(["log", "--oneline", *tips, "--not", *baseline], worktree_path,
                             timeout=timeout)
         return unpushed is None or bool(unpushed)
     except Exception:
@@ -1232,8 +1246,43 @@ def _warn_worktree_footprint(repo_root: str) -> None:
         logger.debug("worktree summary failed", exc_info=True)
 
 
+def _archive_unpushed_orphans(repo_root: str, orphaned: list) -> list:
+    """The subset of *orphaned* that is safe to ``branch -D``: a ``hermes/`` session branch whose
+    tip no remote (or local trunk) holds is archived first (``refs/hermes/archive/<name>``,
+    restorable with ``hermes worktree restore``, expired by ``archive_retention_days``), and kept
+    when that fails. Such branches are the session's only copy once its tree is gone, e.g. after
+    ``git worktree remove --force`` as the exit notice suggests, or a tree left on another ref."""
+    from hermes_cli.worktree_archive import ArchiveError, snapshot_branch
+    sessions = [b for b in orphaned if b.startswith("hermes/")]
+    if not sessions:
+        return orphaned
+    tips = unique = None
+    try:
+        baseline = _unpushed_baseline(repo_root)
+        tips = _git_out(["rev-parse", *[f"refs/heads/{b}" for b in sessions]], repo_root)
+        if baseline is not None and tips is not None:
+            unique = _git_out(["rev-list", *[f"refs/heads/{b}" for b in sessions], "--not", *baseline],
+                              repo_root, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        logger.debug("orphan branch reachability check failed", exc_info=True)
+    if tips is None or unique is None:
+        return [b for b in orphaned if b not in sessions]  # unverifiable: keep every session branch
+    unique_shas = set(unique.split())
+    deletable = [b for b in orphaned if b not in sessions]
+    for name, sha in zip(sessions, tips.split()):
+        if sha in unique_shas:
+            try:
+                snapshot_branch(repo_root, name, reason="orphaned branch with unpushed commits")
+            except (ArchiveError, OSError, subprocess.SubprocessError) as exc:
+                logger.warning("Keeping branch %s: archive failed (%s)", name, exc)
+                continue
+        deletable.append(name)
+    return deletable
+
+
 def _prune_orphaned_branches(repo_root: str, protect: Optional[set] = None) -> None:
-    """Delete local ``hermes/hermes-*`` and ``pr-*`` branches with no worktree, except *protect*."""
+    """Delete local ``hermes/hermes-*`` and ``pr-*`` branches with no worktree, except *protect*;
+    a session branch holding unpushed commits is archived first (``_archive_unpushed_orphans``)."""
     try:
         listing = _git_out(["branch", "--format=%(refname:short)"], repo_root)
         if listing is None:
@@ -1265,6 +1314,7 @@ def _prune_orphaned_branches(repo_root: str, protect: Optional[set] = None) -> N
 
     if not orphaned:
         return
+    orphaned = _archive_unpushed_orphans(repo_root, orphaned)
     for i in range(0, len(orphaned), 50):
         _git_quiet(["branch", "-D"] + orphaned[i:i + 50], repo_root, timeout=30,
                    log="Failed to prune orphaned branches",
