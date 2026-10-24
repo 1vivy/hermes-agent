@@ -39,7 +39,9 @@ it('lists entries, drills into a folder with a way back, and reveals on the icon
   const summary = vi.fn((trail: string[]) => Promise.resolve(trail.length ? inner : home))
   const reveal = vi.fn().mockResolvedValue({ ok: true })
 
-  vi.stubGlobal('hermesDesktop', { storage: { summary, reveal } })
+  const api = vi.fn().mockResolvedValue({ matched: 0, skipped_open: 0, oldest_last_active: null, newest_last_active: null })
+
+  vi.stubGlobal('hermesDesktop', { api, storage: { summary, reveal } })
 
   render(
     <I18nProvider>

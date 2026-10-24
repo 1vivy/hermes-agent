@@ -1,3 +1,4 @@
+import { useStore } from '@nanostores/react'
 import { type ReactElement, useCallback, useContext, useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -6,8 +7,10 @@ import type { DesktopStorageEntry, DesktopStorageSummary } from '@/global'
 import { useI18n } from '@/i18n'
 import { ChevronLeft, Database, FileText, FolderOpen, Loader2, RefreshCw } from '@/lib/icons'
 import { cn } from '@/lib/utils'
+import { $connection } from '@/store/session'
 
 import { SectionHeading, SettingsBreadcrumbContext } from './primitives'
+import { StorageCleanup } from './storage-cleanup'
 
 const UNITS: string[] = ['B', 'KB', 'MB', 'GB', 'TB']
 
@@ -28,6 +31,9 @@ export function StorageSection(): ReactElement | null {
   const { t } = useI18n()
   const s = t.settings.storageSection
   const bridge: Window['hermesDesktop']['storage'] | undefined = window.hermesDesktop?.storage
+  // The breakdown measures this machine; cleanup acts on the connected backend, so a remote
+  // gateway's history is never offered for deletion under local sizes.
+  const remote: boolean = useStore($connection)?.mode === 'remote'
 
   const [summary, setSummary] = useState<DesktopStorageSummary | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
@@ -200,6 +206,7 @@ export function StorageSection(): ReactElement | null {
           {summary.truncated && <p className="pt-2 text-xs text-muted-foreground">{s.truncated}</p>}
         </div>
       )}
+      {trail.length === 0 && !remote && <StorageCleanup onFreed={() => void scan(true)} />}
     </div>
   )
 }

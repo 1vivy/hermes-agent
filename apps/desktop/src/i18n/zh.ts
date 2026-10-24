@@ -1126,7 +1126,7 @@ export const zhOverrides = {
     }),
     storageSection: {
       title: '存储',
-      description: path => `Hermes 在 ${path} 中占用的磁盘空间。此页面仅显示大小，不会删除任何内容。`,
+      description: path => `Hermes 在 ${path} 中占用的磁盘空间。`,
       total: '合计',
       refresh: '重新扫描',
       scanning: '正在统计磁盘占用…',
