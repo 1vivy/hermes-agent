@@ -1284,21 +1284,14 @@ def _reap_session_orphans(repo_root: str, sessions: list) -> None:
                 logger.warning("Keeping branch %s: archive failed (%s)", name, exc)
                 continue
         doomed.append((name, sha))
-    # Archiving takes a while and `update-ref -d` (unlike `branch -D`) deletes a checked-out
-    # branch, so re-read which branches a tree holds right before deleting.
-    try:
-        porcelain = _git_out(["worktree", "list", "--porcelain"], repo_root) if doomed else ""
-    except (OSError, subprocess.SubprocessError):
-        porcelain = None
-    if porcelain is None:
-        return
-    live = {line[len("branch refs/heads/"):] for line in porcelain.splitlines()
-            if line.startswith("branch refs/heads/")}
     env = noninteractive_git_env()
     for name, sha in doomed:
-        if name in live:
-            continue
+        # `update-ref -d` (unlike `branch -D`) deletes a checked-out branch: re-check right before
+        # each delete, as `branch -D` does internally (archiving above can take a while).
         try:
+            porcelain = _git_out(["worktree", "list", "--porcelain"], repo_root)
+            if porcelain is None or f"branch refs/heads/{name}" in porcelain.splitlines():
+                continue
             deleted = _git(["update-ref", "-d", f"refs/heads/{name}", sha], repo_root,
                            stdin=subprocess.DEVNULL, env=env).returncode == 0
         except (OSError, subprocess.SubprocessError):
